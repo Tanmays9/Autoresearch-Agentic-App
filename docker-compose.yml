@@ -1,0 +1,93 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/research.db}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      LOCAL_TOKEN_FILE: ${LOCAL_TOKEN_FILE:-/app/.local/token}
+      ENABLE_EMBEDDINGS: ${ENABLE_EMBEDDINGS:-true}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2025-04-01-preview}
+      AZURE_RESEARCH_DEPLOYMENT: ${AZURE_RESEARCH_DEPLOYMENT:-gpt-5.6-sol}
+      AZURE_REASONING_DEPLOYMENT: ${AZURE_REASONING_DEPLOYMENT:-gpt-5.6-sol}
+      AZURE_RESEARCH_COST_PER_MILLION_TOKENS: ${AZURE_RESEARCH_COST_PER_MILLION_TOKENS:-10}
+      AZURE_REASONING_COST_PER_MILLION_TOKENS: ${AZURE_REASONING_COST_PER_MILLION_TOKENS:-10}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./.local:/app/.local:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./apps/api
+    command: python -m app.worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/research.db}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      LOCAL_TOKEN_FILE: ${LOCAL_TOKEN_FILE:-/app/.local/token}
+      ENABLE_EMBEDDINGS: ${ENABLE_EMBEDDINGS:-true}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+    volumes:
+      - ./data:/app/data
+      - ./.local:/app/.local:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  agent-worker:
+    build:
+      context: ./apps/api
+    command: python -m app.agent_worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/research.db}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      LOCAL_TOKEN_FILE: ${LOCAL_TOKEN_FILE:-/app/.local/token}
+      ENABLE_EMBEDDINGS: ${ENABLE_EMBEDDINGS:-true}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2025-04-01-preview}
+      AZURE_RESEARCH_DEPLOYMENT: ${AZURE_RESEARCH_DEPLOYMENT:-gpt-5.6-sol}
+      AZURE_REASONING_DEPLOYMENT: ${AZURE_REASONING_DEPLOYMENT:-gpt-5.6-sol}
+      LANGGRAPH_CHECKPOINT_PATH: /app/data/langgraph-checkpoints.db
+      INHOUSE_AGENT_CONCURRENCY: ${INHOUSE_AGENT_CONCURRENCY:-5}
+      INHOUSE_TOOL_ROUNDS: ${INHOUSE_TOOL_ROUNDS:-6}
+      INHOUSE_RUN_DEADLINE_MINUTES: ${INHOUSE_RUN_DEADLINE_MINUTES:-90}
+      DOCUMENTATION_EXPERIMENT_BUDGET: ${DOCUMENTATION_EXPERIMENT_BUDGET:-12}
+      AZURE_TOKEN_BUDGET: ${AZURE_TOKEN_BUDGET:-1000000}
+      AZURE_COST_BUDGET_USD: ${AZURE_COST_BUDGET_USD:-50}
+      AZURE_RESEARCH_COST_PER_MILLION_TOKENS: ${AZURE_RESEARCH_COST_PER_MILLION_TOKENS:-10}
+      AZURE_REASONING_COST_PER_MILLION_TOKENS: ${AZURE_REASONING_COST_PER_MILLION_TOKENS:-10}
+    volumes:
+      - ./data:/app/data
+      - ./.local:/app/.local:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

@@ -1,0 +1,13 @@
+{
+  "name": "atlas-research",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "local": "node scripts/start-local.mjs",
+    "runner": "node apps/runner/index.mjs",
+    "smoke:codex": "node apps/runner/smoke-codex.mjs",
+    "smoke:claude": "node apps/runner/smoke-claude.mjs",
+    "mcp:stdio": "node apps/mcp-bridge/index.mjs",
+    "test:runner": "node --test apps/runner/*.test.mjs"
+  }
+}
