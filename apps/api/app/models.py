@@ -31,6 +31,31 @@ class Project(Base):
     runs: Mapped[list[ResearchRun]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
+class ProjectObjective(Base):
+    """Durable definition of what a project's course is trying to achieve.
+
+    The coverage fields are updated by the LangGraph course-completion agent on
+    every bounded iteration.  Atlas keeps this separate from an individual
+    research run so follow-up work never replaces the project's intent.
+    """
+
+    __tablename__ = "project_objectives"
+
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    objective: Mapped[str] = mapped_column(Text)
+    audience: Mapped[str] = mapped_column(String(240), default="Python and basic ML")
+    success_criteria_json: Mapped[str] = mapped_column(Text, default="[]")
+    required_topics_json: Mapped[str] = mapped_column(Text, default="[]")
+    coverage_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    iteration: Mapped[int] = mapped_column(Integer, default=0)
+    completion_score: Mapped[float] = mapped_column(Float, default=0.0)
+    allow_llm_synthesis: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class ResearchRun(Base):
     __tablename__ = "research_runs"
 
@@ -357,6 +382,28 @@ class CourseExpansionRequest(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class CourseFeedback(Base):
+    __tablename__ = "course_feedback"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4str)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    release_id: Mapped[str | None] = mapped_column(ForeignKey("course_releases.id", ondelete="SET NULL"), nullable=True)
+    page_id: Mapped[str | None] = mapped_column(ForeignKey("course_pages.id", ondelete="SET NULL"), nullable=True)
+    documentation_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("documentation_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    allow_llm_synthesis: Mapped[bool] = mapped_column(Boolean, default=True)
+    plan_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AgentProfile(Base):
     __tablename__ = "agent_profiles"
 
@@ -416,6 +463,7 @@ class CoursePageVersion(Base):
     status: Mapped[str] = mapped_column(String(32), default="draft")
     headings_json: Mapped[str] = mapped_column(Text, default="[]")
     quality_score: Mapped[float] = mapped_column(Float, default=0.0)
+    content_provenance: Mapped[str] = mapped_column(String(32), default="source_supported")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -448,6 +496,10 @@ class DocumentationRun(Base):
     experiment_budget: Mapped[int] = mapped_column(Integer, default=12)
     langgraph_thread_id: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     requested_by: Mapped[str] = mapped_column(String(80), default="user")
+    run_type: Mapped[str] = mapped_column(String(32), default="improvement", index=True)
+    instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allow_llm_synthesis: Mapped[bool] = mapped_column(Boolean, default=False)
+    feedback_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

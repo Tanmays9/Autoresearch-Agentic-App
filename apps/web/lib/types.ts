@@ -98,6 +98,7 @@ export type CoursePageSummary = {
   summary: string;
   status: string;
   quality_score: number;
+  content_provenance: string;
   headings: Array<{ level: number; title: string; anchor: string }>;
 };
 
@@ -130,6 +131,10 @@ export type DocumentationRun = {
   status: string;
   experiment_budget: number;
   langgraph_thread_id: string;
+  run_type?: string;
+  instructions?: string;
+  allow_llm_synthesis?: boolean;
+  feedback_id?: string;
   error?: string;
   created_at: string;
   completed_at?: string;
@@ -150,6 +155,55 @@ export type CourseExpansionRequest = {
   updated_at: string;
   completed_at?: string;
   tasks: Array<{ id: string; role: string; objective: string; status: string; assigned_provider?: string }>;
+};
+
+export type CourseFeedback = {
+  id: string;
+  project_id: string;
+  release_id?: string;
+  page_id?: string;
+  page_title?: string;
+  kind: "add" | "remove" | "improve" | "restructure";
+  message: string;
+  status: string;
+  result_summary?: string;
+  documentation_run_id?: string;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+};
+
+export type ProjectObjective = {
+  project_id: string;
+  objective: string;
+  audience: string;
+  success_criteria: string[];
+  required_topics: Array<{
+    title: string;
+    description?: string;
+    recommended_slug?: string;
+    page_type?: string;
+    status: string;
+    reason?: string;
+  }>;
+  coverage: Array<{ title: string; slug?: string; status: string; reason?: string }>;
+  status: string;
+  iteration: number;
+  completion_score: number;
+  allow_llm_synthesis: boolean;
+  last_reviewed_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectRunHistory = Run & {
+  sequence: number;
+  kind: "research" | "course_gap";
+  label: string;
+  task_count: number;
+  completed_task_count: number;
+  tasks: Task[];
 };
 
 export type ReviewDetail = {
@@ -209,7 +263,9 @@ export type Agent = {
 
 export type ProjectDetail = {
   project: Project;
+  objective: ProjectObjective;
   run: Run | null;
+  run_history: ProjectRunHistory[];
   tasks: Task[];
   submissions: Array<{
     id: string;

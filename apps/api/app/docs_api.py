@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from .models import (
     ApprovalDecision,
+    CourseFeedback,
     CourseExpansionRequest,
     CoursePageVersion,
     CourseRelease,
@@ -18,7 +19,22 @@ from .models import (
     DocumentationRun,
     Project,
 )
-from .schemas import CourseExpansionCreate, DocumentationDecisionInput, DocumentationRunCreate
+from .schemas import (
+    CourseCompletionCreate,
+    CourseExpansionCreate,
+    CourseFeedbackCreate,
+    DocumentationDecisionInput,
+    DocumentationRunCreate,
+    ProjectObjectivePatch,
+)
+from .services.course_agent import (
+    create_completion_iteration,
+    create_course_feedback,
+    ensure_project_objective,
+    feedback_payload,
+    objective_payload,
+    update_project_objective,
+)
 from .services.course_expansion import create_expansion_request, expansion_payload
 from .services.documentation import (
     create_documentation_run,
@@ -61,6 +77,73 @@ def _release(db: Session, project_id: str, version: str, *, include_drafts: bool
     if not value:
         raise HTTPException(404, "course release not found")
     return value
+
+
+@router.get("/projects/{project_id}/objective")
+def get_project_objective(project_id: str, db: Session = Depends(get_db)) -> dict:
+    project = _project(db, project_id)
+    value = ensure_project_objective(db, project)
+    db.commit()
+    db.refresh(value)
+    return objective_payload(value)
+
+
+@router.patch("/projects/{project_id}/objective")
+def patch_project_objective(
+    project_id: str,
+    payload: ProjectObjectivePatch,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _project(db, project_id)
+    value = update_project_objective(db, project, **payload.model_dump())
+    return objective_payload(value)
+
+
+@router.post("/projects/{project_id}/course/completion-runs", status_code=202)
+def start_course_completion(
+    project_id: str,
+    payload: CourseCompletionCreate,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _project(db, project_id)
+    try:
+        value = create_completion_iteration(
+            db,
+            project,
+            base_release_id=payload.base_release_id,
+            instructions=payload.instructions,
+            page_budget=payload.page_budget,
+            allow_llm_synthesis=payload.allow_llm_synthesis,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return documentation_run_payload(value, db)
+
+
+@router.get("/projects/{project_id}/course/feedback")
+def list_course_feedback(project_id: str, db: Session = Depends(get_db)) -> dict:
+    _project(db, project_id)
+    values = db.scalars(
+        select(CourseFeedback)
+        .where(CourseFeedback.project_id == project_id)
+        .order_by(CourseFeedback.created_at.desc())
+        .limit(100)
+    ).all()
+    return {"items": [feedback_payload(item, db) for item in values]}
+
+
+@router.post("/projects/{project_id}/course/feedback", status_code=202)
+def submit_course_feedback(
+    project_id: str,
+    payload: CourseFeedbackCreate,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _project(db, project_id)
+    try:
+        value = create_course_feedback(db, project, **payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return feedback_payload(value, db)
 
 
 @router.get("/projects/{project_id}/course/releases")
@@ -210,6 +293,28 @@ def course_diff(project_id: str, draft_version: str, db: Session = Depends(get_d
                     "diff": diff,
                 }
             )
+    draft_page_ids = {page.page_id for page in draft_pages}
+    for page_id, previous in base_pages.items():
+        if page_id in draft_page_ids:
+            continue
+        diff = "\n".join(
+            difflib.unified_diff(
+                previous.markdown.splitlines(),
+                [],
+                fromfile=f"release-{base.version}/{previous.slug}.md",
+                tofile=f"release-{draft.version}/{previous.slug}.md (removed)",
+                lineterm="",
+            )
+        )
+        pages.append(
+            {
+                "slug": previous.slug,
+                "title": f"{previous.title} (removed)",
+                "before_score": previous.quality_score,
+                "after_score": 0,
+                "diff": diff,
+            }
+        )
     return {
         "base": release_payload(base, db),
         "candidate": release_payload(draft, db),

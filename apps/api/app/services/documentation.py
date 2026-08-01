@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..models import (
     ApprovalDecision,
     Claim,
+    CourseFeedback,
     CoursePage,
     CoursePageClaim,
     CoursePageSource,
@@ -22,6 +23,7 @@ from ..models import (
     DocumentationRun,
     Evidence,
     Project,
+    ProjectObjective,
     Source,
     utcnow,
     uuid4str,
@@ -193,6 +195,7 @@ def materialize_course_release(
             status=release_status,
             headings_json=json.dumps(extract_headings(content), ensure_ascii=False),
             quality_score=metrics["total"],
+            content_provenance="source_supported",
         )
         db.add(page_version)
         db.flush()
@@ -215,6 +218,7 @@ def materialize_course_release(
                 status=release_status,
                 headings_json=json.dumps(extract_headings(content), ensure_ascii=False),
                 quality_score=metrics["total"],
+                content_provenance="source_supported",
             )
         )
         db.flush()
@@ -305,6 +309,7 @@ def page_payload(page: CoursePageVersion, db: Session, *, compact: bool = False)
         "summary": page.summary,
         "status": page.status,
         "quality_score": page.quality_score,
+        "content_provenance": page.content_provenance,
         "headings": json.loads(page.headings_json or "[]"),
     }
     if not compact:
@@ -353,14 +358,26 @@ def create_documentation_run(
     base_release_id: str | None,
     experiment_budget: int,
     *,
+    run_type: str = "improvement",
+    instructions: str | None = None,
+    allow_llm_synthesis: bool = False,
+    feedback_id: str | None = None,
+    dedupe_active: bool = True,
     commit: bool = True,
 ) -> DocumentationRun:
-    base = db.get(CourseRelease, base_release_id) if base_release_id else latest_release(db, project_id)
+    base = db.get(CourseRelease, base_release_id) if base_release_id else latest_release(db, project_id, include_drafts=True)
     if not base or base.project_id != project_id:
-        raise ValueError("a published or legacy course release is required")
-    active = db.scalar(select(DocumentationRun).where(DocumentationRun.project_id == project_id, DocumentationRun.status.in_(["queued", "running", "awaiting_approval"])))
-    if active:
-        return active
+        raise ValueError("a course release is required")
+    if dedupe_active:
+        active = db.scalar(
+            select(DocumentationRun).where(
+                DocumentationRun.project_id == project_id,
+                DocumentationRun.run_type == run_type,
+                DocumentationRun.status.in_(["queued", "running"]),
+            )
+        )
+        if active:
+            return active
     run_id = uuid4str()
     run = DocumentationRun(
         id=run_id,
@@ -369,6 +386,10 @@ def create_documentation_run(
         status="queued",
         experiment_budget=experiment_budget,
         langgraph_thread_id=f"documentation:{run_id}",
+        run_type=run_type,
+        instructions=instructions,
+        allow_llm_synthesis=allow_llm_synthesis,
+        feedback_id=feedback_id,
     )
     db.add(run)
     if commit:
@@ -389,6 +410,10 @@ def documentation_run_payload(run: DocumentationRun, db: Session) -> dict:
         "status": run.status,
         "experiment_budget": run.experiment_budget,
         "langgraph_thread_id": run.langgraph_thread_id,
+        "run_type": run.run_type,
+        "instructions": run.instructions,
+        "allow_llm_synthesis": run.allow_llm_synthesis,
+        "feedback_id": run.feedback_id,
         "error": run.error,
         "created_at": run.created_at,
         "completed_at": run.completed_at,
@@ -425,11 +450,29 @@ def decide_documentation_run(db: Session, run: DocumentationRun, decision: str, 
         for page in db.scalars(select(CoursePageVersion).where(CoursePageVersion.release_id == candidate.id)).all():
             page.status = "published"
         run.status = "published"
+        objective = db.get(ProjectObjective, run.project_id)
+        if objective and run.run_type == "completion":
+            objective.status = "completed" if objective.completion_score >= 90 else "active"
+            objective.updated_at = utcnow()
     else:
         candidate = db.get(CourseRelease, run.candidate_release_id) if run.candidate_release_id else None
         if candidate:
             candidate.status = "discarded"
         run.status = "rejected"
+        objective = db.get(ProjectObjective, run.project_id)
+        if objective and run.run_type == "completion":
+            objective.status = "active"
+            objective.updated_at = utcnow()
+    if run.feedback_id:
+        feedback = db.get(CourseFeedback, run.feedback_id)
+        if feedback:
+            feedback.status = "completed" if decision == "approve" else "rejected"
+            feedback.result_summary = (
+                "Feedback changes were approved and published."
+                if decision == "approve"
+                else "The proposed feedback changes were discarded during review."
+            )
+            feedback.completed_at = utcnow()
     run.error = None
     run.completed_at = utcnow()
     db.commit()

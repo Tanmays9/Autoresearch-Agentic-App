@@ -9,6 +9,7 @@ from app.models import (
     CourseExpansionRequest,
     CourseVersion,
     Project,
+    ResearchRun,
     ResearchTask,
     ReviewItem,
 )
@@ -86,3 +87,29 @@ def test_review_api_defaults_to_true_conflicts_only(client):
     assert response.status_code == 200
     assert response.json()["total"] == 1
     assert response.json()["items"][0]["category"] == "conflict"
+
+
+def test_gap_research_preserves_prior_run_and_task_history(client):
+    created = client.post(
+        "/api/v1/projects",
+        json={"title": "Durable history", "topic": "Agent history", "start_immediately": True},
+    ).json()
+    project_id = created["project"]["id"]
+    first_run_id = created["run"]["id"]
+    with SessionLocal() as db:
+        first = db.get(ResearchRun, first_run_id)
+        first.status = "completed"
+        db.commit()
+
+    followup = client.post(
+        f"/api/v1/projects/{project_id}/course/gap-research",
+        json={"query": "Add a section on recovery semantics", "max_topics": 2, "source_budget": 10},
+    )
+    assert followup.status_code == 202, followup.text
+    detail = client.get(f"/api/v1/projects/{project_id}").json()
+    assert len(detail["run_history"]) == 2
+    prior = next(item for item in detail["run_history"] if item["id"] == first_run_id)
+    assert prior["tasks"]
+    assert prior["tasks"][0]["role"] == "planning"
+    listed = client.get(f"/api/v1/projects/{project_id}/research-runs").json()["items"]
+    assert {item["id"] for item in listed} == {first_run_id, followup.json()["run_id"]}

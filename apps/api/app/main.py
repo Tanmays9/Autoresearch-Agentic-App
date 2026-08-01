@@ -23,6 +23,7 @@ from .models import (
     Claim,
     Concept,
     CourseVersion,
+    CourseExpansionRequest,
     CoursePageVersion,
     CourseRelease,
     CrawlJob,
@@ -82,6 +83,7 @@ from .services.orchestration import (
     request_kiro_research,
 )
 from .services.bootstrap import bootstrap_queued_runs
+from .services.course_agent import ensure_project_objective, objective_payload
 from .services.crawler import add_crawl_targets, ensure_crawl_job, get_research_settings
 from .services.documentation import (
     create_documentation_run,
@@ -140,6 +142,47 @@ def run_dict(run: ResearchRun) -> dict:
         "completed_at": run.completed_at,
         "stop_reason": run.stop_reason,
     }
+
+
+def project_run_history(db: Session, project_id: str) -> list[dict]:
+    """Return every research run without collapsing earlier follow-up history.
+
+    A course-gap request creates a new ResearchRun.  The project detail endpoint
+    historically exposed only the newest run, which made older tasks appear to
+    have been deleted even though they remained durable in SQLite.  Keep the
+    latest-run fields for backwards compatibility while also exposing a complete
+    per-project history that clients can browse.
+    """
+    runs = db.scalars(
+        select(ResearchRun)
+        .where(ResearchRun.project_id == project_id)
+        .order_by(ResearchRun.created_at.desc(), ResearchRun.id.desc())
+    ).all()
+    requests = db.scalars(
+        select(CourseExpansionRequest).where(CourseExpansionRequest.project_id == project_id)
+    ).all()
+    request_by_run = {item.run_id: item for item in requests if item.run_id}
+
+    history: list[dict] = []
+    for position, run in enumerate(runs):
+        tasks = db.scalars(
+            select(ResearchTask)
+            .where(ResearchTask.run_id == run.id)
+            .order_by(ResearchTask.created_at, ResearchTask.id)
+        ).all()
+        gap_request = request_by_run.get(run.id)
+        history.append(
+            {
+                **run_dict(run),
+                "sequence": len(runs) - position,
+                "kind": "course_gap" if gap_request else "research",
+                "label": gap_request.query if gap_request else ("Initial research" if position == len(runs) - 1 else "Research run"),
+                "task_count": len(tasks),
+                "completed_task_count": sum(task.status == "completed" for task in tasks),
+                "tasks": [serialize_task(task, db) for task in tasks],
+            }
+        )
+    return history
 
 
 def execution_dict(execution: AgentExecution, db: Session, *, include_events: bool = False) -> dict:
@@ -363,10 +406,13 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> dic
         learner_level=payload.learner_level,
     )
     db.add(project)
+    db.flush()
+    objective = ensure_project_objective(db, project)
     db.commit()
     db.refresh(project)
+    db.refresh(objective)
     run = create_run(db, project) if payload.start_immediately else None
-    return {"project": project_dict(project), "run": run_dict(run) if run else None}
+    return {"project": project_dict(project), "objective": objective_payload(objective), "run": run_dict(run) if run else None}
 
 
 @app.get("/api/v1/projects/{project_id}")
@@ -374,6 +420,8 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> dict:
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "project not found")
+    objective = ensure_project_objective(db, project)
+    db.commit()
     latest_run = db.scalar(
         select(ResearchRun).where(ResearchRun.project_id == project.id).order_by(ResearchRun.created_at.desc())
     )
@@ -419,7 +467,9 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> dict:
     )
     return {
         "project": project_dict(project),
+        "objective": objective_payload(objective),
         "run": run_dict(latest_run) if latest_run else None,
+        "run_history": project_run_history(db, project.id),
         "tasks": [serialize_task(item, db) for item in tasks],
         "submissions": submissions,
         "sources": [
@@ -445,6 +495,13 @@ def get_project(project_id: str, db: Session = Depends(get_db)) -> dict:
         "graph": graph_payload(db, project.id),
         "course": {"version": course.version, "markdown": course.markdown, "created_at": course.created_at} if course else None,
     }
+
+
+@app.get("/api/v1/projects/{project_id}/research-runs")
+def list_project_research_runs(project_id: str, db: Session = Depends(get_db)) -> dict:
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "project not found")
+    return {"items": project_run_history(db, project_id)}
 
 
 @app.post("/api/v1/projects/{project_id}/research-runs", status_code=202)

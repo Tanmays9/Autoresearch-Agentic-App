@@ -13,7 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from .config import get_settings
 from .database import SessionLocal, init_db
-from .models import AgentExecution, AgentInstallation, AgentProfile, CourseVersion, DocumentationRun, ResearchRun, ResearchTask, RunnerRegistration, utcnow
+from .models import AgentExecution, AgentInstallation, AgentProfile, CourseFeedback, CourseVersion, DocumentationRun, ProjectObjective, ResearchRun, ResearchTask, RunnerRegistration, utcnow
 from .services.events import add_event
 from .services.crawler import get_research_settings
 from .services.langgraph_runtime import run_documentation_autoresearch, run_research_execution
@@ -252,6 +252,16 @@ async def execute_documentation(run_id: str) -> None:
                 run.status = "failed"
                 run.error = f"{type(exc).__name__}: {str(exc)[:3200]}"
                 run.completed_at = utcnow()
+                if run.feedback_id:
+                    feedback = db.get(CourseFeedback, run.feedback_id)
+                    if feedback:
+                        feedback.status = "failed"
+                        feedback.error = run.error
+                        feedback.completed_at = utcnow()
+                if run.run_type == "completion":
+                    objective = db.get(ProjectObjective, run.project_id)
+                    if objective:
+                        objective.status = "active"
                 db.commit()
         traceback.print_exc()
 

@@ -48,6 +48,28 @@ class CourseExpansionCreate(BaseModel):
     source_budget: int = Field(default=100, ge=1, le=200)
 
 
+class ProjectObjectivePatch(BaseModel):
+    objective: str | None = Field(default=None, min_length=4, max_length=8000)
+    audience: str | None = Field(default=None, min_length=2, max_length=240)
+    success_criteria: list[str] | None = Field(default=None, max_length=30)
+    allow_llm_synthesis: bool | None = None
+
+
+class CourseCompletionCreate(BaseModel):
+    base_release_id: str | None = None
+    instructions: str | None = Field(default=None, max_length=8000)
+    page_budget: int = Field(default=20, ge=1, le=40)
+    allow_llm_synthesis: bool = True
+
+
+class CourseFeedbackCreate(BaseModel):
+    kind: Literal["add", "remove", "improve", "restructure"]
+    message: str = Field(min_length=4, max_length=4000)
+    release_id: str | None = None
+    page_id: str | None = None
+    allow_llm_synthesis: bool = True
+
+
 class DocumentationRunCreate(BaseModel):
     base_release_id: str | None = None
     experiment_budget: int = Field(default=12, ge=1, le=12)

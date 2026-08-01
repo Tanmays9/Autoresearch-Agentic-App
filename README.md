@@ -445,15 +445,23 @@ Open a course page and use **What is missing from this course?**. Atlas will:
 6. run automatic review and bounded gap correction; and
 7. generate an expanded course release.
 
+### Review and complete an entire course
+
+Every project has a durable **Project objective** above the documentation. Edit it to describe what the finished course should enable the learner to understand or do, then choose **Review and complete course**. A bounded LangGraph course architect reviews the full page index, records a reusable required-topic and coverage map, fills the weakest or empty pages, and proposes new pages for missing required topics. Each iteration creates a separate candidate release; earlier research runs, tasks, feedback, and releases remain available in history.
+
+Course completion and feedback use flexible synthesis by default. Verified citations remain preferred, but `gpt-5.6-sol` may supply useful explanations when sources are incomplete. Such pages carry an explicit `LLM synthesis` notice and provenance value and are never presented as independently verified evidence.
+
+Use **Feedback** on any documentation page to request an addition, removal, rewrite, or course restructuring. Feedback can target the current page or the whole course, remains visible in feedback history, and is processed as its own reviewable documentation run.
+
 ### Evidence and publication policy
 
 - Verified quotations and supported claims are incorporated automatically.
 - Verified single-source claims remain explicitly attributable to that source.
-- Unsupported statements are excluded from factual pages.
+- Unsupported statements are excluded from source-supported claims. Projects may separately permit clearly labelled LLM synthesis in course explanations.
 - Unresolved material remains visible in unresolved-question and audit surfaces.
 - Conflicts are handled conservatively and preserved in the audit record.
 - Documentation autoresearch keeps only candidates that pass deterministic checks, do not regress evidence, and improve the quality score by at least five points.
-- Automatic publication is enabled by default for qualifying documentation candidates. It can be disabled in research settings to restore approval-gated publication.
+- Automatic publication is disabled. Every documentation candidate pauses at a LangGraph approval interrupt and must be explicitly published or discarded by the user.
 
 ### Course output
 

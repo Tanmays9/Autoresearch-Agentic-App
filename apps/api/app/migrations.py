@@ -73,6 +73,27 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
             "WHERE actor = 'atlas_evidence_policy' AND decision = 'approve')",
         ],
     ),
+    (
+        6,
+        [
+            "ALTER TABLE course_page_versions ADD COLUMN content_provenance VARCHAR(32) NOT NULL DEFAULT 'source_supported'",
+            "ALTER TABLE documentation_runs ADD COLUMN run_type VARCHAR(32) NOT NULL DEFAULT 'improvement'",
+            "ALTER TABLE documentation_runs ADD COLUMN instructions TEXT",
+            "ALTER TABLE documentation_runs ADD COLUMN allow_llm_synthesis BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE documentation_runs ADD COLUMN feedback_id VARCHAR(36)",
+            # Base.metadata creates the new objective table before migrations
+            # run. Backfill one durable objective for every existing project.
+            "INSERT OR IGNORE INTO project_objectives "
+            "(project_id, objective, audience, success_criteria_json, required_topics_json, coverage_json, status, iteration, completion_score, allow_llm_synthesis, created_at, updated_at) "
+            "SELECT id, goal, learner_level, '[]', '[]', '[]', 'active', 0, 0.0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM projects",
+        ],
+    ),
+    (
+        7,
+        [
+            "ALTER TABLE course_feedback ADD COLUMN plan_json TEXT NOT NULL DEFAULT '{}'",
+        ],
+    ),
 ]
 
 

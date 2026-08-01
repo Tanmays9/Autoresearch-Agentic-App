@@ -25,6 +25,7 @@ from app.services.langgraph_runtime import (
     ROLE_TOOLS,
     SAFE_TOOLS,
     _tool_definitions,
+    _candidate_prompt,
     build_approval_graph,
     resume_documentation_graph,
 )
@@ -208,6 +209,55 @@ def test_documentation_metrics_follow_weighted_hundred_point_rubric():
     assert value["low_duplication"] <= 10
 
 
+def test_project_objective_completion_agent_and_feedback_are_durable(client):
+    project_id, release_id = create_release(status="draft")
+    objective = client.get(f"/api/v1/projects/{project_id}/objective")
+    assert objective.status_code == 200
+    assert objective.json()["allow_llm_synthesis"] is True
+
+    updated = client.patch(
+        f"/api/v1/projects/{project_id}/objective",
+        json={
+            "objective": "Create a complete practical RAG evaluation course",
+            "success_criteria": ["Cover retrieval and generation evaluation", "Include troubleshooting"],
+            "allow_llm_synthesis": True,
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["objective"].startswith("Create a complete")
+
+    completion = client.post(
+        f"/api/v1/projects/{project_id}/course/completion-runs",
+        json={
+            "base_release_id": release_id,
+            "page_budget": 20,
+            "allow_llm_synthesis": True,
+            "instructions": "Review every page and fill missing material.",
+        },
+    )
+    assert completion.status_code == 202, completion.text
+    assert completion.json()["run_type"] == "completion"
+    assert completion.json()["allow_llm_synthesis"] is True
+
+    page_id = client.get(f"/api/v1/projects/{project_id}/course/releases/latest/tree").json()["pages"][0]["page_id"]
+    feedback = client.post(
+        f"/api/v1/projects/{project_id}/course/feedback",
+        json={
+            "kind": "improve",
+            "message": "Add a concrete worked example and simplify the introduction.",
+            "release_id": release_id,
+            "page_id": page_id,
+            "allow_llm_synthesis": True,
+        },
+    )
+    assert feedback.status_code == 202, feedback.text
+    assert feedback.json()["status"] == "queued"
+    assert feedback.json()["documentation_run_id"]
+    history = client.get(f"/api/v1/projects/{project_id}/course/feedback").json()["items"]
+    assert history[0]["message"].startswith("Add a concrete")
+    assert history[0]["page_title"]
+
+
 def test_tool_permissions_are_role_specific():
     planning = {tool.name for tool in _tool_definitions("project", "run", "task", "execution", "planning")}
     review = {tool.name for tool in _tool_definitions("project", "run", "task", "execution", "review")}
@@ -217,6 +267,21 @@ def test_tool_permissions_are_role_specific():
     assert research == SAFE_TOOLS
     assert "search_web" not in review
     assert not {"shell", "filesystem", "sql", "fetch_url"} & research
+
+
+def test_flexible_synthesis_prompt_requires_visible_provenance_and_forbids_fake_citations():
+    prompt = _candidate_prompt(
+        title="Evaluation",
+        markdown="# Evaluation\n\n_No content yet._",
+        strategy="completion",
+        source_context="[]",
+        objective="Teach practical evaluation",
+        instructions="Fill the page",
+        allow_llm_synthesis=True,
+    )
+    assert "LLM synthesis" in prompt
+    assert "Never invent a source" in prompt
+    assert "Teach practical evaluation" in prompt
 
 
 @pytest.mark.asyncio

@@ -33,7 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { API_URL, api } from "@/lib/api";
-import type { Agent, Project, ProjectDetail, Task } from "@/lib/types";
+import type { Agent, Project, ProjectDetail, ProjectRunHistory, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Tab = "overview" | "agents" | "graph" | "notes" | "reviews" | "sources";
@@ -231,7 +231,7 @@ export function Dashboard() {
               </nav>
               <section className="mt-6">
                 {tab === "overview" && <Overview detail={detail} agents={agents} />}
-                {tab === "agents" && detail.run && <AgentRuns runId={detail.run.id} tasks={detail.tasks} />}
+                {tab === "agents" && <AgentHistory runs={detail.run_history || []} />}
                 {tab === "graph" && <GraphView graph={detail.graph} />}
                 {tab === "notes" && <Notes detail={detail} refresh={() => loadDetail(detail.project.id)} />}
                 {tab === "reviews" && <ReviewWorkbench projectId={detail.project.id} refreshProject={() => loadDetail(detail.project.id)} />}
@@ -304,6 +304,7 @@ function Overview({ detail, agents }: { detail: ProjectDetail; agents: Agent[] }
               {detail.tasks.map((task, index) => <TaskRow key={task.id} task={task} index={index + 1} />)}
               {!detail.tasks.length && <EmptyLine text="No tasks created yet." />}
             </div>
+            {detail.run_history?.length > 1 && <details className="mt-5 rounded-xl border border-border bg-slate-50"><summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-slate-600">View all {detail.run_history.length} retained research runs</summary><div className="space-y-2 border-t border-border p-3">{detail.run_history.map((run) => <div key={run.id} className="flex min-w-0 items-center justify-between gap-3 rounded-lg bg-white px-3 py-2"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-700">#{run.sequence} · {run.label}</p><p className="mt-0.5 text-[10px] text-slate-400">{run.completed_task_count} of {run.task_count} tasks complete · {new Date(run.created_at).toLocaleString()}</p></div><Badge value={run.status} /></div>)}</div></details>}
           </CardContent>
         </Card>
 
@@ -334,6 +335,16 @@ function Overview({ detail, agents }: { detail: ProjectDetail; agents: Agent[] }
       {detail.submissions.length > 0 && <SubmissionComparison detail={detail} />}
     </div>
   );
+}
+
+function AgentHistory({ runs }: { runs: ProjectRunHistory[] }) {
+  const [selected, setSelected] = useState<string | null>(runs[0]?.id || null);
+  useEffect(() => {
+    if (!selected || !runs.some((run) => run.id === selected)) setSelected(runs[0]?.id || null);
+  }, [runs, selected]);
+  const run = runs.find((item) => item.id === selected) || runs[0];
+  if (!run) return <Card><CardContent className="grid min-h-64 place-items-center text-sm text-slate-400">No research runs have been created yet.</CardContent></Card>;
+  return <div className="space-y-4"><Card><CardContent className="flex min-w-0 gap-2 overflow-x-auto p-3">{runs.map((item) => <button key={item.id} onClick={() => setSelected(item.id)} className={cn("min-w-48 rounded-xl border px-3 py-2 text-left transition", item.id === run.id ? "border-primary bg-emerald-50" : "border-border bg-white hover:bg-muted")}><span className="block truncate text-xs font-semibold text-slate-700">#{item.sequence} · {item.label}</span><span className="mt-1 block text-[10px] text-slate-400">{item.task_count} tasks · {item.status}</span></button>)}</CardContent></Card><AgentRuns runId={run.id} tasks={run.tasks} /></div>;
 }
 
 function Metric({ icon: Icon, label, value, note }: { icon: typeof Activity; label: string; value: string; note: string }) {
